@@ -5,7 +5,6 @@
 # Included Skills:
 #   - android-rom-dev      (AOSP build troubleshooting, Kati/Soong, OOM, prebuilts)
 #   - rom-git-commits      (Conventional commits, pre-commit audit, branch sync)
-#   - rom-documentation    (Markdown standards, device specs, architecture trees)
 #
 # Usage:
 #   Global install (recommended):   ./install.sh
@@ -39,7 +38,7 @@ for skill_path in "${SKILLS_DIR}"/*; do
     if [ -d "${skill_path}" ] && [ -f "${skill_path}/SKILL.md" ]; then
         skill_name="$(basename "${skill_path}")"
         echo ""
-        echo "📦 Installing skill: ${skill_name}..."
+        echo "Installing skill: ${skill_name}..."
 
         # Ensure executable permissions on any scripts
         if [ -d "${skill_path}/scripts" ]; then
@@ -50,27 +49,25 @@ for skill_path in "${SKILLS_DIR}"/*; do
             dest="${WORKSPACE_ROOT}/${skill_name}"
             mkdir -p "${dest}"
             cp -r "${skill_path}/"* "${dest}/"
-            echo "   ✅ Installed into workspace: ${dest}"
+            echo "   Installed into workspace: ${dest}"
         else
             mkdir -p "${GLOBAL_ROOT_1}/${skill_name}"
             cp -r "${skill_path}/"* "${GLOBAL_ROOT_1}/${skill_name}/"
-            echo "   ✅ Installed to: ${GLOBAL_ROOT_1}/${skill_name}"
+            echo "   Installed to: ${GLOBAL_ROOT_1}/${skill_name}"
 
             mkdir -p "${GLOBAL_ROOT_2}/${skill_name}"
             cp -r "${skill_path}/"* "${GLOBAL_ROOT_2}/${skill_name}/"
-            echo "   ✅ Installed to: ${GLOBAL_ROOT_2}/${skill_name}"
+            echo "   Installed to: ${GLOBAL_ROOT_2}/${skill_name}"
         fi
     fi
 done
 
 echo ""
 echo "=========================================================="
-echo "🎉 Skill Suite Installation Complete!"
+echo "Skill Suite Installation Complete"
 echo "=========================================================="
-echo "Antigravity IDE will now automatically discover and activate:"
-echo "  1. android-rom-dev   - For build debugging, Soong/Kati, and OOM issues."
-echo "  2. rom-git-commits   - For commit messages, pre-commit checks, and branch parity."
-echo "  3. rom-documentation - For device trees, READMEs, and changelogs."
+echo "Antigravity IDE will now discover and activate:"
+echo "  1. android-rom-dev   - Build debugging, Soong/Kati, and environment issues."
+echo "  2. rom-git-commits   - Commit messages, pre-commit checks, and branch parity."
 echo ""
-echo "⚡ Tokens are saved automatically through progressive disclosure: each skill"
-echo "   is loaded into context only when its specific workflow is triggered!"
+echo "Skills load into context on demand when triggered."

@@ -2,7 +2,8 @@
 # ==============================================================================
 # Script: sync_rom_branches.sh
 # Purpose: Fast-forward merges the current branch into a target paired branch
-#          and pushes both to origin, keeping ROM trees in parity.
+#          and pushes both to origin, keeping shared ROM trees in parity.
+#          NOTE: Do NOT use on repositories with branch-distinct configs (e.g. manifests).
 # Usage: ./sync_rom_branches.sh [target_branch]
 # Example: ./sync_rom_branches.sh PixelOS-16-QPR2
 # ==============================================================================
@@ -33,5 +34,4 @@ git push origin "${TARGET_BRANCH}"
 echo "Returning to working branch '${CURRENT_BRANCH}'..."
 git checkout "${CURRENT_BRANCH}"
 
-echo "✅ Parity synchronization complete!"
-
+echo "[OK] Parity synchronization complete."

@@ -5,7 +5,6 @@
     Installs:
       - android-rom-dev      (AOSP build troubleshooting, Kati/Soong, OOM, prebuilts)
       - rom-git-commits      (Conventional commits, pre-commit audit, branch sync)
-      - rom-documentation    (Markdown standards, device specs, architecture trees)
 .PARAMETER Workspace
     Installs only into the current project workspace (.agents\skills\) instead of globally.
 .EXAMPLE
@@ -63,12 +62,10 @@ foreach ($skill in $SkillFolders) {
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "[SUCCESS] Skill Suite Installation Complete!" -ForegroundColor Cyan
+Write-Host "[SUCCESS] Skill Suite Installation Complete" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "Antigravity IDE will now automatically discover and activate:"
-Write-Host "  1. android-rom-dev   - For build debugging, Soong/Kati, and OOM issues."
-Write-Host "  2. rom-git-commits   - For commit messages, pre-commit checks, and branch parity."
-Write-Host "  3. rom-documentation - For device trees, READMEs, and changelogs."
+Write-Host "Antigravity IDE will now discover and activate:"
+Write-Host "  1. android-rom-dev   - Build debugging, Soong/Kati, and environment issues."
+Write-Host "  2. rom-git-commits   - Commit messages, pre-commit checks, and branch parity."
 Write-Host ""
-Write-Host "Progressive disclosure saves tokens automatically: each skill loads" -ForegroundColor Yellow
-Write-Host "into context only when its specific workflow is triggered!" -ForegroundColor Yellow
+Write-Host "Skills load into context on demand when triggered." -ForegroundColor Yellow

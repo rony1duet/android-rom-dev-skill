@@ -7,35 +7,35 @@ description: >-
   or maintaining parity across paired branches (e.g. PixelOS-17-base and PixelOS-16-QPR2).
 ---
 
-# Android ROM Git Commit & Branch Synchronization Standards
+# Android ROM Git Commit and Branch Synchronization Standards
 
-This runbook guides agents in drafting production-grade commit messages, performing strict pre-commit cleanup, and keeping multi-branch ROM trees in sync.
+This guide covers standards for drafting commit messages, performing pre-commit staging cleanup, and maintaining multi-branch ROM trees.
 
 ---
 
-## 🛑 1. Pre-Commit Staging Hygiene (Forbidden Files)
+## 1. Pre-Commit Staging Hygiene (Forbidden Files)
 
-**NEVER** stage or commit temporary, local, or build-generated files:
-- **Build & IDE caches**: `.gradle/`, `.idea/`, `.kotlin/`, `build/`, `out/`, `bin/`, `.cxx/`
-- **Local configs**: `local.properties`, `gradle.properties`, `settings.gradle` (in pure AOSP packages)
-- **Test artifacts**: `AndroidManifest_debug.xml`, test packages (`*.apk`, `*.aab`), temporary screenshots (`*.png`)
-- **Binary objects**: `.so` libraries unless officially pinned and tracked in a prebuilt vendor tree.
+Never stage or commit temporary, local, or build-generated files:
+- Build and IDE caches: `.gradle/`, `.idea/`, `.kotlin/`, `build/`, `out/`, `bin/`, `.cxx/`
+- Local configurations: `local.properties`, `gradle.properties`, `settings.gradle` (in pure AOSP packages)
+- Test artifacts: `AndroidManifest_debug.xml`, test packages (`*.apk`, `*.aab`), temporary images (`*.png`)
+- Binary objects: `.so` libraries unless officially pinned and tracked in a prebuilt vendor tree.
 
 ### Quick Sanitize Command
-Before `git add`, purge local build garbage:
+Before running `git add`, purge local build files:
 ```bash
 rm -rf .gradle .idea .kotlin build out 2>/dev/null || true
 rm -f AndroidManifest_debug.xml local.properties *.png 2>/dev/null || true
 ```
 
-Or run the automated helper:
+Or run the pre-commit audit script:
 [git_precommit_check.sh](./scripts/git_precommit_check.sh)
 
 ---
 
-## 📝 2. Commit Message Conventions
+## 2. Commit Message Conventions
 
-Follow the AOSP / LineageOS / PixelOS subsystem prefix convention:
+Follow the AOSP, LineageOS, and PixelOS subsystem prefix convention:
 
 ```text
 <subsystem>: <imperative summary>
@@ -44,64 +44,60 @@ Follow the AOSP / LineageOS / PixelOS subsystem prefix convention:
 ```
 
 ### Subsystem Tags
-- **Apps / Audio**: `LunarisDolby:`, `Aperture:`, `AudioFX:`, `Settings:`
-- **Device Trees**: `<device>:`, `sweet2:`, `sm6150-common:`
-- **Vendor / Prebuilts**: `gcam:`, `vendor:`, `prebuilts:`
-- **Kernel / HALs**: `kernel:`, `sepolicy:`, `hardware:`
-- **Build Infra**: `build_scripts:`, `manifest:`, `soong:`
+- Apps and Audio: `LunarisDolby:`, `Aperture:`, `AudioFX:`, `Settings:`
+- Device Trees: `<device>:`, `sweet2:`, `sm6150-common:`
+- Vendor and Prebuilts: `gcam:`, `vendor:`, `prebuilts:`
+- Kernel and HALs: `kernel:`, `sepolicy:`, `hardware:`
+- Build Infrastructure: `build_scripts:`, `manifest:`, `soong:`
 
 ### Rules
-1. **Imperative Mood**: Use "fix", "add", "synchronize", "remove", "update" (NOT "fixed", "adds", "fixing").
-2. **Concise Summary**: Under 72 characters on the first line.
-3. **No Redundant Contributors**: Keep commit logs focused on technical changes rather than marketing fluff.
+1. Imperative mood: Use "fix", "add", "synchronize", "remove", "update" (not "fixed", "adds", "fixing").
+2. Concise summary: Under 72 characters on the first line.
+3. No redundant contributors: Keep commit logs focused on technical changes rather than marketing fluff.
 
 For examples, see [Commit Style Guide](./references/commit_style_guide.md).
 
 ---
 
-## 🔄 3. Multi-Branch Parity Protocol
+## 3. Multi-Branch Parity and Branch-Distinct Configuration
 
-When working in ROM trees with paired base branches (e.g., `PixelOS-17-base` and `PixelOS-16-QPR2`):
+When maintaining repositories that support multiple Android releases (such as `PixelOS-17-base` and `PixelOS-16-QPR2`):
 
-```mermaid
-sequenceDiagram
-    participant Dev as Working Branch (PixelOS-17-base)
-    participant LocalAlt as Paired Branch (PixelOS-16-QPR2)
-    participant Remote as Origin Remote
+### A. Shared Code Repositories (Fast-Forward Sync)
+For device trees, hardware HALs, and shared vendor components where code is identical across releases:
+1. Commit on the active branch:
+   ```bash
+   git add <files>
+   git diff --cached --check
+   git commit -m "<subsystem>: <imperative message>"
+   git push origin PixelOS-17-base
+   ```
+2. Fast-forward merge to the paired branch:
+   ```bash
+   git checkout PixelOS-16-QPR2
+   git merge PixelOS-17-base
+   git push origin PixelOS-16-QPR2
+   git checkout PixelOS-17-base
+   ```
 
-    Dev->>Dev: Stage files & verify git diff --check
-    Dev->>Dev: git commit -m "subsystem: description"
-    Dev->>Remote: git push origin PixelOS-17-base
-    Dev->>LocalAlt: git checkout PixelOS-16-QPR2
-    LocalAlt->>LocalAlt: git merge PixelOS-17-base (fast-forward)
-    LocalAlt->>Remote: git push origin PixelOS-16-QPR2
-    LocalAlt->>Dev: git checkout PixelOS-17-base
-```
+### B. Branch-Distinct Repositories (Cherry-Pick / Isolated Commits)
+Never blindly fast-forward merge repositories that contain version-specific configurations:
+- Manifest repositories (`manifest_sweet2`): Revisions must explicitly point to `PixelOS-17-base` vs `PixelOS-16-QPR2`.
+- Prebuilt / camera manifests (`GCam_sweet2`, `android_prebuilts_sweet2`): Branch-specific tracking targets must not be overwritten.
+- Build scripts (`build_scripts_sweet2`): Scripts and branch documentation are specific to each Android version.
 
-### Standard Execution Steps
-```bash
-# 1. Commit on active branch
-git add <files>
-git diff --cached --check # verify NO trailing whitespace / CRLF
-git commit -m "<subsystem>: <imperative message>"
-git push origin PixelOS-17-base
+For branch-distinct repositories:
+1. Port common logic via `git cherry-pick -x <commit>` or manual edits.
+2. Verify that manifest revisions and clone commands match the checked-out branch.
+3. Verify with `git diff --check` before pushing.
 
-# 2. Sync to paired branch
-git checkout PixelOS-16-QPR2
-git merge PixelOS-17-base
-git push origin PixelOS-16-QPR2
-
-# 3. Return to primary branch
-git checkout PixelOS-17-base
-```
-
-Or run the automated synchronizer:
-[sync_rom_branches.sh](./scripts/sync_rom_branches.sh)
+See [Branch Sync Protocol](./references/branch_sync_protocol.md) for details.
 
 ---
 
-## ⚡ Token-Saving Guidelines for Agents
-- Do not run verbose `git diff` on entire repositories if checking file lists suffices (`git status --short`, `git diff --stat`).
-- Use `git diff --check` instead of printing entire files to check whitespace.
-- Run `git_precommit_check.sh` to validate staging in a single command.
-
+## 4. Pre-Commit Checklist
+- Working tree is free of IDE caches (`.idea/`, `.gradle/`) and build outputs.
+- `git diff --cached --check` returns zero whitespace or CRLF warnings.
+- `.gitattributes` enforces `* text=auto eol=lf`.
+- Commit subject line is under 72 characters with an imperative subsystem prefix.
+- Branch-distinct files maintain their branch-specific revisions and URLs.

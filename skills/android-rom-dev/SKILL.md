@@ -9,218 +9,99 @@ description: >-
   or resolving SEPolicy, VINTF, and AudioFX integration issues.
 ---
 
-# Android Custom ROM Development & Build Troubleshooting Guide
+# Android Custom ROM Development & Troubleshooting Guide
 
-This skill equips the Antigravity agent with production-grade engineering knowledge, failure diagnoses, and automated repair procedures for building Android custom ROMs (Android 14, 15, 16, 17+).
+Comprehensive engineering reference for building and debugging Android custom ROMs (Android 14, 15, 16, 17+).
 
----
+## Failure Diagnostic Flow
 
-## 🧭 Core Workflow & Decision Flowchart
+1. **`curl: (3) / syntax error / $'\r'`**: Windows CRLF line ending in `.env`, `.sh`, or `.bp`. Strip with `sed -i 's/\r$//'` and enforce in `.gitattributes`.
+2. **`cannot assign to readonly: PRODUCT_*`**: Kati vs Soong phase violation. Product packages must live in `.mk` fragments inherited by `device.mk`, never inside `Android.mk`.
+3. **`Killed / soong_build OOM`**: Container RAM/Swap exhaustion. Export `GOMEMLIMIT=14GiB`, `GOGC=40`, and `MALLOC_ARENA_MAX=2`.
+4. **`exec format error / missing clang`**: Unexpanded Git LFS pointer text file in prebuilts. Run `repo forall -r "prebuilts/.*" -c "git lfs pull"`.
+5. **`VINTF / manifest mismatch`**: HAL interface version mismatch. Invalidate `check_vintf` intermediates and verify matrix compatibility level.
+6. **`dexpreopt failed / verify error`**: Prebuilt APK fails dex2oat optimization. Set `dex_preopt: { enabled: false }` in `Android.bp`.
 
-```mermaid
-flowchart TD
-    Start["ROM Build Failure Detected"] --> Analyze["Examine Full Build Log (Last 150 Lines)"]
-    Analyze --> Decision{"Identify Failure Category"}
-    
-    Decision -->|"curl: (3) / syntax error / $'\r'"| CRLF["CRLF Line Ending Malformation"]
-    Decision -->|"cannot assign to readonly: PRODUCT_*"| KatiError["Kati vs Soong Phase Violation"]
-    Decision -->|"Killed / soong_build OOM"| MemOOM["Container RAM & Swap Exhaustion"]
-    Decision -->|"exec format error / missing clang"| LFS["Git LFS Toolchain Pointers"]
-    Decision -->|"VINTF / manifest mismatch"| VintfError["VINTF / HAL Compatibility"]
-    Decision -->|"neverallow / duplicate context"| Sepolicy["SELinux Policy Conflict"]
-    Decision -->|"dexpreopt failed / verify error"| DexError["Dexpreopt on Prebuilt APK"]
-    
-    CRLF --> FixCRLF["Sanitize with sed / .gitattributes to LF"]
-    KatiError --> FixKati["Move PRODUCT_* to device.mk; Keep Android.bp"]
-    MemOOM --> FixMem["Provision 16GB Swap & GOMEMLIMIT=14GiB"]
-    LFS --> FixLFS["Run git lfs pull in prebuilts"]
-    VintfError --> FixVintf["Wipe check_vintf intermediates & align HAL matrix"]
-    Sepolicy --> FixSepolicy["Wipe recovery_sepolicy & check eol=lf"]
-    DexError --> FixDex["Set dex_preopt: { enabled: false } in bp"]
-    
-    FixCRLF --> Incremental["Run Incremental Build (NO clean build needed)"]
-    FixKati --> Incremental
-    FixMem --> Incremental
-    FixLFS --> Incremental
-    FixVintf --> Incremental
-    FixSepolicy --> Incremental
-    FixDex --> Incremental
-```
+## Core Engineering Rules
 
----
-
-## ⚡ The 10 Golden Rules of Custom ROM Engineering
-
-### 1. The Kati vs. Soong Separation (Never put `PRODUCT_*` in `Android.mk`)
-* **Phase 1 (Product Configuration)**: Reads `device.mk`, `BoardConfig.mk`, `AndroidProducts.mk`. In this phase, `PRODUCT_PACKAGES`, `PRODUCT_COPY_FILES`, and `PRODUCT_PROPERTY_OVERRIDES` are mutable.
-* **Phase 2 (Soong)**: Reads all `Android.bp` files across the tree and generates `out/soong/build.<product>.ninja`. Prebuilt apps (`android_app_import`), binaries, and libraries belong here.
-* **Phase 3 (Kati / Make)**: Kati locks all `PRODUCT_*` variables as **read-only**. It scans all subdirectories and executes every file named `Android.mk`.
-* **The Rule**: `Android.mk` is a **reserved file name** for module build rules (`LOCAL_*` variables and `include $(BUILD_*)`). **NEVER** assign `PRODUCT_PACKAGES` inside an `Android.mk`. It will immediately cause:
-  ```text
-  error: cannot assign to readonly variable: PRODUCT_PACKAGES
-  ```
-* **Solution**: Product package declarations belong in `.mk` fragments (e.g., `device_<device>_<app>.mk`) inherited from `device.mk`:
+### 1. Kati vs Soong Separation (Never put `PRODUCT_*` in `Android.mk`)
+- **Product Configuration Phase (Make)**: Reads `device.mk`, `BoardConfig.mk`. `PRODUCT_PACKAGES` and properties are mutable.
+- **Soong Phase**: Evaluates all `Android.bp` blueprints and outputs the Ninja graph.
+- **Kati Phase**: Kati executes all `Android.mk` files and locks `PRODUCT_*` variables as **read-only**.
+- **Rule**: Never assign `PRODUCT_PACKAGES` inside an `Android.mk`. Product package declarations belong in `.mk` fragments inherited from `device.mk`:
   ```makefile
   $(call inherit-product-if-exists, vendor/<name>/aosp/device_<device>.mk)
   ```
-  And the app module is declared in `Android.bp`.
-
----
+  App modules belong in `Android.bp`.
 
 ### 2. Line Ending Normalization (`\r\n` vs `\n`)
-* Scripts, configuration files (`.env`), XMLs, and policy files created or edited on Windows contain Carriage Return characters (`\r\n`).
-* **Symptoms**:
-  - `curl: (3) URL rejected: Bad query`: caused by sourcing a `.env` file where `URL="https://...download\r"`.
-  - `/bin/sh: $'\r': command not found`
-  - Sepolicy compile failures: hidden carriage returns break parser lexing.
-* **Solution**:
-  - Add `.gitattributes` to every repository:
-    ```gitattributes
-    * text=auto eol=lf
-    *.sh text eol=lf
-    *.env text eol=lf
-    *.mk text eol=lf
-    *.bp text eol=lf
-    *.xml text eol=lf
-    *.rc text eol=lf
-    ```
-  - Defensively sanitize inputs in shell scripts:
-    ```bash
-    sed -i 's/\r$//' path/to/*.sh path/to/*.env 2>/dev/null || true
-    ```
-  - Strip trailing `\r` when reading bash variables:
-    ```bash
-    VAR="${VAR%$'\r'}"
-    ```
-
----
-
-### 3. Dexpreopt for Prebuilt Applications
-* When importing prebuilt apps (such as Google Camera, GCam mods, Dolby Atmos, or microG) via `android_app_import` in `Android.bp`, AOSP attempts to strip the DEX and pre-optimize it for the target architecture (`dex2oat`).
-* Prebuilt commercial APKs often fail dexpreopt due to multidex structures or hidden API dependencies.
-* **Solution**: Always explicitly disable dexpreopt in the `Android.bp`:
-  ```blueprint
-  android_app_import {
-      name: "GoogleCameraEng",
-      apk: "GoogleCameraEng.apk",
-      product_specific: true,
-      privileged: true,
-      presigned: true,
-      dex_preopt: {
-          enabled: false,
-      },
-  }
+Windows CRLF endings corrupt bash execution, curl URLs, and sepolicy compilation.
+- Enforce in `.gitattributes`:
+  ```gitattributes
+  * text=auto eol=lf
+  *.sh text eol=lf
+  *.env text eol=lf
+  *.mk text eol=lf
+  *.bp text eol=lf
+  *.xml text eol=lf
+  *.rc text eol=lf
   ```
-
----
-
-### 4. Container Swap & Memory Tuning (Preventing OOM Kills)
-* In cloud/container build environments (e.g., Docker, Crave.io, GitHub Actions), memory limits often trigger the Linux Out-Of-Memory (OOM) killer on `soong_build` or `clang++`.
-* **Solution**: Check available swap and provision a 16GB swap file before starting the build:
+- Strip defensively in scripts:
   ```bash
-  TOTAL_SWAP_MB=$(free -m 2>/dev/null | awk '/^Swap:/ {print $2}')
-  if [ -n "$TOTAL_SWAP_MB" ] && [ "$TOTAL_SWAP_MB" -lt 8192 ]; then
-      sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 2>/dev/null || true
-      sudo chmod 600 /swapfile 2>/dev/null || true
-      sudo mkswap /swapfile 2>/dev/null || true
-      sudo swapon /swapfile 2>/dev/null || true
-  fi
+  sed -i 's/\r$//' path/*.sh path/*.env 2>/dev/null || true
   ```
-* Tune Go GC and Soong memory settings:
+
+### 3. Dexpreopt on Prebuilt APKs
+Commercial prebuilts (GCam, Dolby Atmos, microG) often fail `dex2oat` during ROM packaging. Always disable dexpreopt in the `Android.bp`:
+```blueprint
+android_app_import {
+    name: "GoogleCameraEng",
+    apk: "GoogleCameraEng.apk",
+    product_specific: true,
+    privileged: true,
+    presigned: true,
+    dex_preopt: {
+        enabled: false,
+    },
+}
+```
+
+### 4. Container Storage & Memory Management
+- **Never rely on `swapon` in unprivileged containers**: Containers on Crave or Docker typically block `swapon` (`Operation not permitted`). Creating a 16GB swapfile on `/` will fail to activate and waste 16GB of container storage, causing `No space left on device`.
+- **Clean inactive swapfiles**: Check for dead `/swapfile` from previous aborted runs and remove immediately.
+- **Prune Git LFS local cache**: Blobs under `.git/lfs/objects` duplicate gigabytes of storage. Prune with:
   ```bash
-  export GOGC=40
-  export GOMEMLIMIT=14GiB
-  export MALLOC_ARENA_MAX=2
-  export SOONG_GOGC=40
-  export SOONG_INCREMENTAL_ANALYSIS=false
+  find . -type d -name "objects" -path "*/.git/lfs/objects" -exec rm -rf {} + 2>/dev/null || true
   ```
-
----
-
-### 5. Incremental vs. Clean Build Decisions
-* **Do NOT run `make clean`** for:
-  - Makefile syntax errors or Kati errors (`cannot assign to readonly variable`).
-  - `Android.bp` modifications or module additions.
-  - Shell script / prebuilt fetch failures.
-  - Minor C/C++/Java/Kotlin bug fixes.
-  - *Kati and Soong automatically monitor modified files and regenerate Ninja build targets incrementally.*
-* **Targeted Partial Cleans**:
-  - Kernel changes: `rm -rf out/target/product/<device>/obj/KERNEL_OBJ`
-  - VINTF manifest changes: `rm -rf out/target/product/<device>/obj/PACKAGING/check_vintf_all_intermediates`
-  - SELinux policy changes: `rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.*`
-* **When is a full clean (`rm -rf out`) actually required?**:
-  - Major Android version upgrade (e.g., A16 to A17).
-  - Switching build variant (user to userdebug or eng) with incompatible signers.
-  - Fundamental changes in partition layout / dynamic partition sizing.
-
----
-
-### 6. Git LFS Toolchains
-* AOSP prebuilts (Clang compiler under `prebuilts/clang/host/linux-x86` and Rust compiler under `prebuilts/rust`) frequently use Git LFS pointers.
-* If Git LFS is missing or not pulled, binaries will be ~130-byte text pointers, throwing:
-  `exec format error: prebuilts/clang/host/linux-x86/.../clang`
-* **Solution**:
+- **Drop unneeded test targets**: Prevent building unused unit test suites:
   ```bash
-  git -C prebuilts/clang/host/linux-x86 lfs pull
-  git -C prebuilts/rust lfs pull
+  export DONT_INSTALL_DEXPREOPT_TESTS=true
+  export SKIP_BOOT_JARS_CHECK=true
+  export WITHOUT_CHECK_API=true
   ```
 
----
+### 5. Incremental Build Preservation
+- **Never wipe `out/` unconditionally**: A clean build takes 2 to 4 hours. Incremental builds on Crave (`--no-patch`) finish in minutes by reusing 155,000+ compiled targets.
+- **Perform targeted invalidations only**:
+  - Kernel: `rm -rf out/target/product/<device>/obj/KERNEL_OBJ`
+  - VINTF: `rm -rf out/target/product/<device>/etc/vintf out/target/product/<device>/obj/PACKAGING`
+  - SEPolicy: `rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.*`
+  - Test suites & symbols: `rm -rf out/target/product/<device>/symbols out/target/product/<device>/testcases out/dist`
 
-### 7. VINTF Compatibility & Manifests
-* Android enforces runtime hardware interface matching between `/vendor/etc/vintf/manifest.xml` and `/system/etc/vintf/compatibility_matrix.xml`.
-* If a HAL declaration version is bumped in the vendor tree without corresponding matrix support, `check_vintf` will fail.
-* Always verify target HAL interface version (HIDL vs AIDL) and remove intermediate check files when updating manifests.
+### 6. Clean Scripting Standards
+- Avoid linear script spaghetti; structure build automation into distinct functions:
+  `clean_workspace()`, `setup_manifests()`, `sync_sources()`, `sync_device_repos()`, `setup_toolchain()`, `cleanup_storage()`, `setup_environment()`, `build_target()`, `upload_artifacts()`.
+- Use `set -eo pipefail` and clean error handlers (`die()`).
+- Avoid multi-iteration `for` loops running `rm -rf` individual paths; pass paths directly to a single `rm -rf` invocation.
 
----
+### 7. Branch-Distinct Documentation
+When maintaining multiple ROM branches (e.g., `PixelOS-17-base` and `PixelOS-16-QPR2`):
+- Documentation, local manifests, and clone commands must accurately reflect the specific branch.
+- Avoid cross-branch contamination (e.g. A16 README pointing to an A17 manifest branch).
+- Keep README files concise, technical, and free of artificial emoji spam.
 
-### 8. System Priv-App Permissions & Whitelisting
-* Any app installed to `/product/priv-app` or `/system/priv-app` requesting privileged permissions (e.g., `PACKAGE_USAGE_STATS`, `WRITE_SECURE_SETTINGS`) **must** provide a permissions XML whitelist:
-  ```xml
-  <permissions>
-      <privapp-permissions package="com.package.name">
-          <permission name="android.permission.PACKAGE_USAGE_STATS"/>
-      </privapp-permissions>
-  </permissions>
-  ```
-* Include it in `Android.bp`:
-  ```blueprint
-  prebuilt_etc {
-      name: "privapp-permissions-myapp",
-      src: "privapp-permissions-myapp.xml",
-      sub_dir: "permissions",
-      product_specific: true,
-  }
-  ```
+## Reference Guides
 
----
-
-### 9. SystemUI Quick Settings Tile State Sync
-* For audio mods and hardware services (e.g., Dolby Atmos):
-  - Do not rely on polling.
-  - Use `TileService.requestListeningState(context, ComponentName(...))` when internal settings change.
-  - Use `OnSharedPreferenceChangeListener` or reactive Kotlin `StateFlow` to synchronize UI in real-time.
-  - In companion objects for AudioEffects, avoid `@hide` fields (e.g. `EFFECT_TYPE_NULL`) that cause `NoSuchFieldError` on non-framework classloaders.
-
----
-
-### 10. Multi-Repo Branch Parity
-* Custom ROM source trees often comprise multiple coupled repositories:
-  - `device/xiaomi/<device>`
-  - `device/xiaomi/<soc>-common`
-  - `vendor/xiaomi/<device>`
-  - `vendor/xiaomi/<soc>-common`
-  - `kernel/xiaomi/<soc>`
-  - `hardware/dolby`
-  - `vendor/GCam_<device>`
-* Always maintain unified branch naming (e.g. `PixelOS-17-base` and `PixelOS-16-QPR2`) and keep them fast-forward synchronized across all remotes.
-
----
-
-## 🛠️ Included Reference Guides
-
-For in-depth explanations and checklists, consult:
-* [Build Failure Playbook](./references/build_failure_playbook.md) — Comprehensive failure catalog and solutions.
-* [Kati & Soong Rules](./references/kati_soong_rules.md) — Architecture rules for blueprints and makefiles.
-* [Incremental vs. Clean Guide](./references/incremental_vs_clean.md) — Fast build decision tree.
-
+- [Build Failure Playbook](./references/build_failure_playbook.md) — Failure catalog and solutions.
+- [Kati & Soong Rules](./references/kati_soong_rules.md) — Blueprint and makefile rules.
+- [Incremental vs. Clean Guide](./references/incremental_vs_clean.md) — Build decision tree.

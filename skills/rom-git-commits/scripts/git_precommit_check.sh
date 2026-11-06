@@ -45,9 +45,8 @@ if ! git diff --cached --check; then
 fi
 
 if [ "$FOUND_FORBIDDEN" -eq 1 ]; then
-    echo "❌ Pre-commit audit FAILED! Clean your staging area before committing."
+    echo "[FAIL] Pre-commit audit failed. Clean your staging area before committing."
     exit 1
 fi
 
-echo "✅ Pre-commit audit passed! Staging area is clean and ready to commit."
-
+echo "[OK] Pre-commit audit passed. Staging area is clean and ready to commit."
